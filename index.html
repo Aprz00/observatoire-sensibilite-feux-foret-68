@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Observatoire Forestier - Haut Rhin</title>
+    
+    <!-- Importation des librairies externes (Leaflet pour la carte, Chart.js pour le graphique) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+    <style>
+        /* Définition des variables de couleur et de taille pour le thème sombre */
+        :root {
+            --bg-dark: #020617;
+            --panel-bg: rgba(15, 23, 42, 0.95);
+            --border-soft: rgba(255, 255, 255, 0.1);
+            --primary: #2ecc71;
+            --gray-out: #334155;
+            --sidebar-width: 360px;
+        }
+
+        /* Style général du corps de la page */
+        body { margin: 0; display: flex; height: 100vh; font-family: 'Inter', sans-serif; background-color: var(--bg-dark); color: #f8fafc; overflow: hidden; width: 100vw; }
+        
+        /* STYLES POUR LES FENÊTRES MODALES (pop-ups) */
+        #welcome-overlay, #info-overlay, #help-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(8px);
+            display: flex; align-items: center; justify-content: center;
+            z-index: 9999; transition: opacity 0.4s ease;
+        }
+        .modal-card {
+            background: var(--panel-bg); border: 1px solid var(--border-soft);
+            padding: 40px; border-radius: 20px; max-width: 600px; text-align: center;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+        .modal-card h2 { color: var(--primary); margin-top: 0; margin-bottom: 20px; }
+        
+        .modal-body p { 
+            color: #94a3b8; 
+            font-size: 1rem; 
+            line-height: 1.6; 
+            margin-bottom: 20px; 
+            text-align: justify; 
+        }
+        .modal-body span { color: #f8fafc; font-weight: 600; }
+        .instruction { font-size: 0.85rem !important; font-style: italic; color: #64748b !important; margin-top: 30px; text-align: center !important; }
+
+        .close-btn { background: var(--primary); color: white; border: none; padding: 12px 30px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-top: 20px; }
+
+        /* Styles spécifiques pour la légende dans la modale d'aide */
+        .help-legend-container {
+            margin-top: 30px;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .help-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr; 
+            gap: 20px;
+        }
+
+        .help-last-row {
+            display: flex;
+            justify-content: center; 
+            margin-top: 5px;
+        }
+
+        .help-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            background: rgba(255, 255, 255, 0.03); 
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid var(--border-soft);
+        }
+
+        .help-item span {
+            font-size: 0.85rem;
+            text-align: left;
+            white-space: nowrap; 
+        }
+
+        .color-box {
+            width: 20px;
+            height: 20px;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+
+        /* STYLES POUR LA BARRE LATÉRALE (SIDEBAR) */
+        #sidebar { 
+            width: var(--sidebar-width); background: var(--panel-bg); 
+            border-right: 1px solid var(--border-soft); padding: 20px; 
+            display: flex; flex-direction: column; z-index: 1000; 
+            box-sizing: border-box; flex-shrink: 0; gap: 10px;
+            transition: margin-left 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+        }
+        #sidebar.collapsed { margin-left: calc(-1 * var(--sidebar-width)); }
+
+        /* Bouton pour afficher/masquer la sidebar */
+        #toggle-sidebar {
+            position: absolute; right: -30px; top: 20px; width: 30px; height: 60px;
+            background: var(--panel-bg); border: 1px solid var(--border-soft);
+            border-left: none; border-radius: 0 8px 8px 0;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; color: var(--primary); font-weight: bold; z-index: 1001;
+        }
+
+        /* Conteneur de la carte */
+        #map { flex: 1; background: var(--bg-dark); height: 100%; position: relative; }
+
+        /* Styles des éléments de la sidebar (titres, filtres, stats, etc.) */
+        h1 { font-size: 1.2rem; margin: 0; font-weight: 800; color: white; letter-spacing: 1px; flex-shrink: 0; }
+        .tagline { font-size: 0.65rem; color: #64748b; margin-bottom: 5px; text-transform: uppercase; flex-shrink: 0; }
+        
+        .filter-card, .chart-card { 
+            background: rgba(255, 255, 255, 0.03); padding: 12px; border-radius: 10px; 
+            border: 1px solid var(--border-soft); width: 100%; box-sizing: border-box; flex-shrink: 1;
+        }
+
+        label { display: block; font-size: 0.65rem; font-weight: 600; color: #94a3b8; margin-bottom: 5px; text-transform: uppercase; }
+        select { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid var(--border-soft); background: #0f172a; color: white; font-size: 0.8rem; outline: none; }
+
+        .opacity-control { display: flex; align-items: center; gap: 10px; }
+        input[type=range] { flex: 1; accent-color: var(--primary); height: 4px; cursor: pointer; }
+        .opacity-val { font-size: 0.7rem; color: var(--primary); min-width: 30px; font-weight: bold; }
+
+        .mini-legend { display: flex; justify-content: space-between; margin-top: 8px; }
+        .leg-item { width: 18%; height: 5px; border-radius: 2px; }
+        .leg-item.muted { background-color: var(--gray-out) !important; opacity: 0.2; }
+
+        .stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; flex-shrink: 0; }
+        .stat-item { background: rgba(46, 204, 113, 0.08); border: 1px solid rgba(46, 204, 113, 0.15); padding: 8px; border-radius: 8px; text-align: center; }
+        .stat-value { display: block; font-size: 1rem; font-weight: 800; color: var(--primary); }
+        .stat-label { font-size: 0.55rem; color: #94a3b8; text-transform: uppercase; }
+
+        .chart-card { flex: 1; display: flex; flex-direction: column; min-height: 150px; }
+        #chart-container { flex: 1; width: 100%; position: relative; }
+
+        /* STYLES DES BOUTONS PERSONNALISÉS SUR LA CARTE (zoom, info, aide) */
+        .custom-map-btn {
+            position: absolute; right: 20px; z-index: 1000;
+            background: #0f172a; border: 1px solid var(--border-soft);
+            border-radius: 40px; width: 44px; height: 44px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+            color: white; transition: all 0.3s;
+        }
+        .custom-map-btn:hover { background: #1e293b; border-color: var(--primary); }
+
+        #btn-zoom-in { top: 20px; border-radius: 40px 40px 0 0; border-bottom: none; height: 40px; }
+        #btn-zoom-out { top: 60px; border-radius: 0 0 40px 40px; height: 40px; }
+        #btn-info { top: 115px; font-style: italic; font-family: serif; font-size: 1.2rem; }
+        #btn-help { top: 165px; font-weight: bold; font-size: 1.1rem; }
+
+        /* STYLE DU SÉLECTEUR DE FOND DE CARTE */
+        #basemap-selector {
+            position: absolute; top: 215px; right: 20px; z-index: 1000;
+            background: #0f172a; border: 1px solid var(--border-soft);
+            border-radius: 40px; width: 44px; height: 44px; display: flex; align-items: center; 
+            cursor: pointer; box-shadow: 0 8px 32px rgba(0,0,0,0.5); transition: width 0.3s;
+            overflow: hidden; flex-direction: row-reverse;
+        }
+        #basemap-selector.open { width: 310px; border-radius: 12px; }
+        .basemap-icon { min-width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; }
+        .leaflet-icon-svg { width: 26px; height: 26px; background-image: url('https://unpkg.com/leaflet@1.9.4/dist/images/layers.png'); background-size: 26px 26px; filter: invert(1); }
+        
+        .basemap-options { display: flex; gap: 8px; opacity: 0; pointer-events: none; padding-left: 15px; flex: 1; justify-content: center; }
+        #basemap-selector.open .basemap-options { opacity: 1; pointer-events: auto; }
+        .basemap-btn { background: rgba(255,255,255,0.05); border: 1px solid var(--border-soft); color: white; padding: 6px 10px; border-radius: 6px; font-size: 0.7rem; cursor: pointer; white-space: nowrap;}
+        .basemap-btn.active { background: var(--primary); border-color: var(--primary); font-weight: bold; }
+
+        /* Masquage du contrôle de zoom par défaut de Leaflet */
+        .leaflet-control-zoom { display: none; }
+        
+        /* Style personnalisé pour l'échelle de la carte */
+        .leaflet-control-scale-line {
+        background: none !important; 
+        border: 2px solid white !important;
+        border-top: none !important;
+        color: white !important;
+        font-family: 'Inter', sans-serif;
+        font-weight: bold;
+        font-size: 11px;
+        text-shadow: 1px 1px 2px black;
+        padding: 0 5px;
+        }
+
+    </style>
+</head>
+<body>
+
+<!-- MODALE DE BIENVENUE : s'affiche au chargement de la page -->
+<div id="welcome-overlay">
+    <div class="modal-card">
+        <h2>Observatoire forestier du Haut-Rhin</h2>
+        <div class="modal-body">
+            <p>Cet outil interactif permet d’analyser la <span>sensibilité des massifs forestiers aux incendies</span>, sur une échelle graduée de 0 à 4. En croisant les données de risque d'incendies avec les types d'essences d'arbres, ce tableau de bord facilite l'exploration des enjeux locaux.</p>
+            <p class="instruction">Utilisez les filtres situés à gauche pour personnaliser votre analyse.</p>
+        </div>
+        <button class="close-btn" onclick="closeModal('welcome-overlay')">Accéder à l'observatoire</button>
+    </div>
+</div>
+
+<!-- MODALE D'INFORMATIONS : s'affiche au clic sur le bouton 'i' -->
+<div id="info-overlay" style="display:none; opacity:0;">
+    <div class="modal-card">
+        <h2>À Propos</h2>
+        <div class="modal-body">
+            <p><b><span>Concepteur :</span></b> Perez Lisea Alejandro</p>
+            
+            <p><b><span>Contexte :</span></b> Travail exploratoire réalisé dans le cadre du recrutement pour le stage de "Chargé de mission enjeux forestiers" au sein de la Région Grand Est.</p>
+            
+            <p><b><span>Données sources :</span></b>
+                <br>• Sensibilité aux feux de forêt et de végétation - DDT 68.
+                <br>• Occupation du Sol du Haut-Rhin - DIMAP. 
+            </p>
+        </div>
+        <button class="close-btn" onclick="closeModal('info-overlay')">Retour à l'observatoire</button>
+    </div>
+</div>
+
+<!-- MODALE D'AIDE (LÉGENDE) : s'affiche au clic sur le bouton '?' -->
+<div id="help-overlay" style="display:none; opacity:0;">
+    <div class="modal-card" style="max-width: 550px;">
+        <h2>Les niveaux de sensibilité aux feux de forêt dans le Haut-Rhin</h2>
+        
+        <div class="help-legend-container">
+            <div class="help-grid">
+                <div class="help-item"><div class="color-box" style="background:#00f2ff"></div><span><b>Indice 0 :</b> Très faible</span></div>
+                <div class="help-item"><div class="color-box" style="background:#39ff14"></div><span><b>Indice 1 :</b> Faible</span></div>
+                <div class="help-item"><div class="color-box" style="background:#ccff00"></div><span><b>Indice 2 :</b> Modéré</span></div>
+                <div class="help-item"><div class="color-box" style="background:#ff9900"></div><span><b>Indice 3 :</b> Élevé</span></div>
+            </div>
+            
+            <div class="help-last-row">
+                <div class="help-item"><div class="color-box" style="background:#ff003c"></div><span><b>Indice 4 :</b> Critique</span></div>
+            </div>
+        </div>
+
+        <button class="close-btn" onclick="closeModal('help-overlay')">Retour à l'observatoire</button>
+    </div>
+</div>
+
+<!-- BARRE LATÉRALE (SIDEBAR) : contient les filtres, les stats et le graphique -->
+<div id="sidebar">
+    <div id="toggle-sidebar" onclick="toggleSidebar()">◀</div>
+    <h1>OBSERVATOIRE FORESTIER</h1>
+    <div class="tagline">Analyse de la sensibilité aux incendies - Haut-Rhin</div>
+    
+    <!-- Filtre par type de peuplement -->
+    <div class="filter-card">
+        <label>Type de peuplements</label>
+        <select id="essenceSelect" onchange="updateFilters()">
+            <option value="all">Tous les peuplements</option>
+            <option value="311">Forêts de feuillus</option>
+            <option value="312">Forêts de conifères</option>
+            <option value="313">Forêts mixtes</option>
+            <option value="314">Coupes à blanc et jeunes plantations</option>
+            <option value="315">Peupleraies et sapinières</option>
+        </select>
+    </div>
+
+    <!-- Filtre par indice de sensibilité -->
+    <div class="filter-card">
+        <label>Indice de sensibilité</label>
+        <select id="dnSelect" onchange="updateFilters()">
+            <option value="all">Tous les indices</option>
+            <option value="0">0 - Risque Très faible</option>
+            <option value="1">1 - Risque Faible</option>
+            <option value="2">2 - Risque Modéré</option>
+            <option value="3">3 - Risque Élevé</option>
+            <option value="4">4 - Risque Critique</option>
+        </select>
+        <div class="mini-legend">
+            <div class="leg-item" data-dn="0" style="background:#00f2ff"></div>
+            <div class="leg-item" data-dn="1" style="background:#39ff14"></div>
+            <div class="leg-item" data-dn="2" style="background:#ccff00"></div>
+            <div class="leg-item" data-dn="3" style="background:#ff9900"></div>
+            <div class="leg-item" data-dn="4" style="background:#ff003c"></div>
+        </div>
+    </div>
+
+    <!-- Contrôle de l'opacité de la couche -->
+    <div class="filter-card">
+        <label>Opacité <span class="opacity-val" id="opacityDisplay">90%</span></label>
+        <div class="opacity-control">
+            <input type="range" id="opacityRange" min="0" max="100" value="90" oninput="changeOpacity(this.value)">
+        </div>
+    </div>
+
+    <!-- Affichage des statistiques -->
+    <div class="stats-grid">
+        <div class="stat-item"><span class="stat-value" id="stat-ha">0</span><span class="stat-label">Hectares</span></div>
+        <div class="stat-item"><span class="stat-value" id="stat-pc">0%</span><span class="stat-label">Part du peuplement</span></div>
+    </div>
+
+    <!-- Conteneur pour le graphique Chart.js -->
+    <div class="chart-card">
+        <div id="chart-container"><canvas id="myChart"></canvas></div>
+    </div>
+</div>
+
+<!-- CONTENEUR PRINCIPAL DE LA CARTE -->
+<div id="map">
+    <!-- Boutons de contrôle personnalisés -->
+    <div id="btn-zoom-in" class="custom-map-btn" onclick="map.zoomIn()">+</div>
+    <div id="btn-zoom-out" class="custom-map-btn" onclick="map.zoomOut()">-</div>
+    <div id="btn-info" class="custom-map-btn" onclick="openModal('info-overlay')">i</div>
+    <div id="btn-help" class="custom-map-btn" onclick="openModal('help-overlay')">?</div>
+
+    <!-- Sélecteur de fond de carte -->
+    <div id="basemap-selector" onclick="this.classList.toggle('open')">
+        <div class="basemap-icon"><div class="leaflet-icon-svg"></div></div>
+        <div class="basemap-options">
+            <button id="btn-dark" class="basemap-btn active" onclick="changeBasemap('dark')">Sombre</button>
+            <button id="btn-light" class="basemap-btn" onclick="changeBasemap('light')">Clair</button>
+            <button id="btn-satellite" class="basemap-btn" onclick="changeBasemap('satellite')">Sat</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    
+    // Fonctions pour gérer l'ouverture et la fermeture des modales avec une transition en fondu
+    function closeModal(id) {
+        document.getElementById(id).style.opacity = '0';
+        setTimeout(() => { document.getElementById(id).style.display = 'none'; }, 400);
+    }
+    function openModal(id) {
+        const o = document.getElementById(id);
+        o.style.display = 'flex';
+        setTimeout(() => { o.style.opacity = '1'; }, 10);
+    }
+
+    // Variable pour stocker l'opacité actuelle de la couche
+    var currentOpacity = 0.9;
+    // Initialisation de la carte Leaflet, centrée sur le Haut-Rhin, sans le contrôle de zoom par défaut
+    var map = L.map('map', { zoomControl: false }).setView([47.85, 7.35], 9.5);
+    // Ajout de l'échelle à la carte
+    L.control.scale({
+    imperial: false,
+    position: 'bottomleft'
+    }).addTo(map);
+    
+    // Définition des différents fonds de carte (basemaps) disponibles
+    const basemaps = {
+        dark: L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png'),
+        light: L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'),
+        satellite: L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}')
+    };
+    // Ajout du fond de carte sombre par défaut
+    basemaps.dark.addTo(map);
+
+    // Fonction pour afficher/masquer la barre latérale et redimensionner la carte
+    function toggleSidebar() {
+        const s = document.getElementById('sidebar');
+        s.classList.toggle('collapsed');
+        document.getElementById('toggle-sidebar').innerText = s.classList.contains('collapsed') ? "▶" : "◀";
+        // Attendre la fin de l'animation pour redimensionner la carte et éviter les problèmes d'affichage
+        setTimeout(() => { map.invalidateSize(); }, 400);
+    }
+
+    // Fonction pour changer l'opacité de la couche de données en fonction du slider
+    function changeOpacity(val) {
+        currentOpacity = val / 100;
+        document.getElementById('opacityDisplay').innerText = val + "%";
+        if (geojsonLayer) geojsonLayer.setStyle({ fillOpacity: currentOpacity, opacity: currentOpacity });
+    }
+
+    // Fonction pour changer le fond de carte
+    function changeBasemap(type) {
+        // Retire tous les fonds de carte actuels
+        Object.values(basemaps).forEach(l => map.removeLayer(l));
+        // Ajoute le fond de carte sélectionné
+        basemaps[type].addTo(map);
+        // Met à jour l'état actif des boutons de sélection
+        document.querySelectorAll('.basemap-btn').forEach(b => b.classList.remove('active'));
+        document.getElementById('btn-' + type).classList.add('active');
+        // Empêche la propagation de l'événement pour ne pas fermer le sélecteur
+        event.stopPropagation();
+    }
+
+    // Variables globales pour la couche GeoJSON, les données brutes et l'instance du graphique
+    var geojsonLayer, rawData, myChart;
+    // Palette de couleurs pour les niveaux de risque
+    const neonPalette = ['#00f2ff','#39ff14','#ccff00','#ff9900','#ff003c'];
+    // Fonction qui retourne une couleur en fonction de l'indice de sensibilité (DN)
+    function getColor(d) { return d == 4 ? '#ff003c' : d == 3 ? '#ff9900' : d == 2 ? '#ccff00' : d == 1 ? '#39ff14' : '#00f2ff'; }
+
+    // Fonction principale qui met à jour l'affichage en fonction des filtres sélectionnés
+    function updateFilters(val) {
+        var selEss = document.getElementById('essenceSelect').value;
+        var selDN = (val !== undefined) ? val : document.getElementById('dnSelect').value;
+        if(val !== undefined) document.getElementById('dnSelect').value = selDN;
+        
+        // Met à jour la mini-légende en grisant les indices non sélectionnés
+        document.querySelectorAll('.leg-item').forEach(item => {
+            (selDN === "all" || item.getAttribute('data-dn') == selDN) ? item.classList.remove('muted') : item.classList.add('muted');
+        });
+
+        // Retire l'ancienne couche de la carte si elle existe
+        if (geojsonLayer) map.removeLayer(geojsonLayer);
+
+        // Calcule les statistiques (surface par indice de risque) pour le type de peuplement sélectionné
+        var stats = { "0":0, "1":0, "2":0, "3":0, "4":0 };
+        var totalGlobalHa = 0;
+        rawData.features.forEach(f => {
+            if (selEss === "all" || f.properties.cod_n3 == selEss) {
+                totalGlobalHa += f.properties.surf_ha;
+                stats[f.properties.DN] += f.properties.surf_ha;
+            }
+        });
+
+        // Filtre les données GeoJSON en fonction des sélections
+        var filtered = { type: "FeatureCollection", features: rawData.features.filter(f => {
+            if (selEss === "all" || f.properties.cod_n3 == selEss) return (selDN === "all" || f.properties.DN == selDN);
+            return false;
+        })};
+
+        // Met à jour les indicateurs de surface
+        let selectedHa = (selDN === "all") ? totalGlobalHa : stats[selDN];
+        document.getElementById('stat-ha').innerText = Math.round(selectedHa).toLocaleString();
+        document.getElementById('stat-pc').innerText = (totalGlobalHa > 0) ? ((selectedHa / totalGlobalHa) * 100).toFixed(1) + "%" : "0%";
+        
+        // Crée et ajoute la nouvelle couche GeoJSON filtrée à la carte
+        geojsonLayer = L.geoJSON(filtered, {
+            style: f => ({ fillColor: getColor(f.properties.DN), weight: 0.5, color: getColor(f.properties.DN), fillOpacity: currentOpacity, opacity: currentOpacity }),
+            onEachFeature: (f, layer) => { layer.bindPopup(`<b>${f.properties.lib_n3}</b><br>Sensibilité : ${f.properties.DN}`); }
+        }).addTo(map);
+
+        // Met à jour le graphique avec les nouvelles statistiques
+        updateChart(stats, selDN);
+    }
+
+    // Fonction pour créer ou mettre à jour le graphique (doughnut chart)
+    function updateChart(stats, selDN) {
+        var ctx = document.getElementById('myChart').getContext('2d');
+        // Détruit l'ancien graphique s'il existe pour en créer un nouveau
+        if (myChart) myChart.destroy();
+        
+        // Personnalise le titre du graphique en fonction du peuplement sélectionné
+        var essenceMenu = document.getElementById('essenceSelect');
+        var nomEssence = essenceMenu.options[essenceMenu.selectedIndex].text;
+        var titreDynamique = "RÉPARTITION DU RISQUE : " + nomEssence.toUpperCase();
+
+        // Applique les couleurs : normal pour les indices sélectionnés, grisé pour les autres
+        const colors = neonPalette.map((c, i) => (selDN === "all" || i == selDN) ? c : '#334155');
+        
+        myChart = new Chart(ctx, {
+            type: 'doughnut',
+            data: { 
+                labels: ['0','1','2','3','4'], 
+                datasets: [{ 
+                    data: Object.values(stats), 
+                    backgroundColor: colors, 
+                    borderWidth: 0,
+                    hoverOffset: 10
+                }] 
+            },
+            options: { 
+                maintainAspectRatio: false, 
+                cutout: '50%',
+                plugins: { 
+                    legend: { display: false }, 
+                    title: { 
+                        display: true, 
+                        text: titreDynamique, 
+                        color: '#64748b',
+                        font: { size: 10, weight: 'bold' }
+                    } 
+                },
+                // Permet de filtrer en cliquant sur une section du graphique
+                onClick: (e, i) => { if(i.length > 0) updateFilters(i[0].index); } 
+            }
+        });
+    }
+
+    // Chargement initial des données GeoJSON. Une fois chargées, lance la fonction updateFilters()
+    fetch('data_foret.json').then(r => r.json()).then(d => { rawData = d; updateFilters(); });
+</script>
+</body>
+</html>
